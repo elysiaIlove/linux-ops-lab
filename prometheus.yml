@@ -1,0 +1,32 @@
+# ============================================================
+# Prometheus 主配置
+# 放置位置：/opt/prometheus/prometheus.yml
+#
+# 校验：/opt/prometheus/promtool check config /opt/prometheus/prometheus.yml
+# 热重载：curl -X POST http://localhost:9090/-/reload
+#         （需启动时带 --web.enable-lifecycle，见 /etc/default/prometheus）
+# ============================================================
+global:
+  scrape_interval: 15s        # 采集间隔
+  evaluation_interval: 15s    # 告警规则评估间隔
+
+# 告警规则文件
+rule_files:
+  - /opt/prometheus/rules/*.yml
+
+# 告警推送到 Alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['localhost:9093']
+
+scrape_configs:
+  # 监控 Prometheus 自己
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 监控主机（由 node_exporter 暴露指标）
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']

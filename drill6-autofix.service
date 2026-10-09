@@ -1,0 +1,36 @@
+# ============================================================================
+#  drill6-autofix.service —— 在 emergency mode 出现之前自动执行 /fix
+#  安装位置：/etc/systemd/system/drill6-autofix.service
+#  启用方式：systemctl daemon-reload && systemctl enable drill6-autofix.service
+#            （会在 /etc/systemd/system/emergency.target.wants/ 下建软链）
+# ----------------------------------------------------------------------------
+#  为什么这样写：
+#    1) DefaultDependencies=no + Before=emergency.service emergency.target
+#       —— 让它在紧急 shell 弹出来之前就跑完，实现"零打字"恢复。
+#    2) After=systemd-remount-fs.service
+#       —— 排在 remount 之后；实测 emergency mode 里 / 已是 rw，正是因为
+#          systemd-remount-fs 在 local-fs.target 之前就完成了重挂载。
+#    3) ConditionPathExists=/etc/drill6-armed
+#       —— 【安全设计】只在"待命"时触发。
+#          自动修复如果无条件执行，会在任何原因的 emergency 里都去改 fstab，
+#          从而【掩盖真实故障】。所以要求显式待命。
+#    4) 一次性：/fix 在成功恢复后会自己删掉 /etc/drill6-armed。
+#
+#  用法：
+#    需要救援时      touch /etc/drill6-armed     （之后进 emergency 会自动修）
+#    想手动执行      /fix                        （在 emergency shell / 救援 chroot 里）
+# ============================================================================
+[Unit]
+Description=Restore /etc/fstab before entering emergency mode (armed once)
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=emergency.service emergency.target
+ConditionPathExists=/etc/drill6-armed
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/fix
+
+[Install]
+WantedBy=emergency.target

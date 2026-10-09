@@ -1,0 +1,59 @@
+# ============================================================
+# Prometheus 告警规则
+# 放置位置：/opt/prometheus/rules/host-alerts.yml
+# 由 prometheus.yml 的 rule_files 引入
+#
+# 校验：/opt/prometheus/promtool check rules /opt/prometheus/rules/host-alerts.yml
+# ============================================================
+groups:
+  - name: host-alerts
+    rules:
+      # ---- 磁盘使用率过高 ----
+      - alert: DiskUsageHigh
+        # 只针对真实块设备，排除 tmpfs 等伪文件系统
+        # 不限定 mountpoint，因此会同时覆盖 / 与 /boot
+        # （/boot 写满会导致无法安装内核、甚至无法启动）
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|rootfs"}
+               / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|rootfs"}) * 100 > 80
+        # 持续 2 分钟才触发，避免瞬时抖动造成误报
+        # 条件满足但未满 2 分钟时状态为 pending，不会通知
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "磁盘使用率过高 ({{ $labels.instance }})"
+          description: "挂载点 {{ $labels.mountpoint }} 使用率 {{ printf \"%.1f\" $value }}%，已超过 80%"
+
+      # ---- 采集目标不可达 ----
+      # up 是 Prometheus 自身生成的指标：1 = 抓取成功，0 = 失败
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "采集目标不可达 ({{ $labels.instance }})"
+          description: "job {{ $labels.job }} 的实例 {{ $labels.instance }} 已不可达超过 1 分钟"
+
+      # ---- 可用内存不足 ----
+      # 使用 available 而非 free：Linux 会把空闲内存用于 buff/cache
+      - alert: MemoryLow
+        expr: node_memory_MemAvailable_bytes < 200 * 1024 * 1024
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "可用内存不足 ({{ $labels.instance }})"
+          description: "可用内存仅 {{ printf \"%.0f\" $value }} 字节（低于 200MB）"
+
+      # ---- 系统负载过高 ----
+      # 阈值为 CPU 核数（本机 4 核）
+      - alert: LoadHigh
+        expr: node_load1 > 4
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "系统负载过高 ({{ $labels.instance }})"
+          description: "1 分钟平均负载 {{ printf \"%.2f\" $value }}，超过 CPU 核数 4"

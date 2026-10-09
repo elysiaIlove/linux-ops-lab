@@ -1,0 +1,68 @@
+# ============================================================
+# Alertmanager 配置
+# 放置位置：/opt/alertmanager/alertmanager.yml
+#
+# 职责：告警到达后决定「发给谁、怎么分组、是否抑制、间隔多久重发」
+#       （判断"有没有问题"是 Prometheus 的职责，两者分工不同）
+#
+# 校验：/opt/alertmanager/amtool check-config /opt/alertmanager/alertmanager.yml
+# 路由调试：/opt/alertmanager/amtool config routes test \
+#             --config.file=/opt/alertmanager/alertmanager.yml severity=warning
+#
+# ⚠️ 注意：auth_password 是 163 邮箱的 SMTP 授权码（不是登录密码）。
+#    此文件包含凭据，不要提交到 Git 仓库。
+# ============================================================
+global:
+  # 告警未被显式标记为已解决时，多久后认为已解决
+  resolve_timeout: 5m
+
+# 告警分组与路由（树形结构，优先匹配子路由）
+route:
+  # 按 告警名 + 实例 分组：同一组内的多条告警合并为一条通知，避免告警风暴
+  group_by: ['alertname', 'instance']
+
+  # 新分组等待 10s 再发送，让同批告警聚齐
+  group_wait: 10s
+
+  # 同一分组内新增告警的发送间隔
+  group_interval: 1m
+
+  # 未恢复的告警重复提醒间隔
+  repeat_interval: 1h
+
+  # 默认接收器：一般告警走邮件
+  receiver: 'opslab-email'
+
+  routes:
+    # 按严重级别分流：critical 走 webhook 落日志（便于事后追溯）
+    - matchers:
+        - severity = "critical"
+      receiver: 'opslab-webhook'
+      repeat_interval: 30m
+      continue: false
+
+receivers:
+  # 通道 1：webhook 落日志（接收 critical 告警）
+  - name: 'opslab-webhook'
+    webhook_configs:
+      - url: 'http://127.0.0.1:5001/webhook'
+        send_resolved: true      # 恢复通知也发送
+
+  # 通道 2：163 邮箱（接收 warning 告警）
+  - name: 'opslab-email'
+    email_configs:
+      - to: '你的邮箱@163.com'
+        from: '你的邮箱@163.com'
+        smarthost: 'smtp.163.com:465'
+        auth_username: '你的邮箱@163.com'
+        auth_password: '此处填 163 邮箱的 SMTP 授权码，不是登录密码'
+        require_tls: false
+        send_resolved: true
+
+# 抑制规则：某类告警触发时，压制相关但信息量更低的告警
+inhibit_rules:
+  # 实例不可达（critical）时，抑制该实例上所有 warning 告警
+  # 理由：机器都连不上了，磁盘/内存告警没有意义，只会造成干扰
+  - source_matchers: [severity = "critical"]
+    target_matchers: [severity = "warning"]
+    equal: ['instance']
